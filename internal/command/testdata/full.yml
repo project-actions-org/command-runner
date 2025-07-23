@@ -1,0 +1,9 @@
+help:
+  short: This shows up on the command list screen
+  long: |
+    This shows up on the help screen
+  order: 10
+context: outside-container
+steps:
+  - run: docker-compose up -d
+  - echo: "Hello World"
