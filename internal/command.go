@@ -1,4 +1,4 @@
-package command
+package internal
 
 import (
 	"fmt"
@@ -22,14 +22,10 @@ type Help struct {
 }
 
 type Step struct {
-	Action  *Action `yaml:"action,omitempty"`
+	Action  *string `yaml:"action,omitempty"`
 	Echo    *string `yaml:"echo,omitempty"`
 	Command *string `yaml:"command,omitempty"`
 	Run     *string `yaml:"run,omitempty"`
-}
-
-type Action struct {
-	Name string `yaml:"action,omitempty"`
 }
 
 func ParseCommandFile(path string) (*Command, error) {
@@ -76,8 +72,11 @@ func RunCommand(commandName string, command *Command, isOutsideContainer bool) e
 
 	for _, step := range command.Steps {
 		if step.Action != nil {
-			// this should execute the provided action
-			fmt.Println("Action not implemented yet:", step.Action.Name)
+			action, ok := actionMap[*step.Action]
+			if !ok {
+				return fmt.Errorf("action %s not found", *step.Action)
+			}
+			action()
 			continue
 		}
 

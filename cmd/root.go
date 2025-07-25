@@ -4,23 +4,27 @@ Copyright © 2025 Ralph Schindler <ralph@ralphschindler.com>
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 
-	"github.com/project-actions-org/command-runner/internal/command"
+	internal "github.com/project-actions-org/command-runner/internal"
+	"github.com/sirupsen/logrus"
+
 	"github.com/spf13/cobra"
 )
 
 var commandSpecs []struct {
-	spec *command.Command
+	spec *internal.Command
 	name string
 }
+var debug bool = os.Getenv("DEBUG") == "true"
 var rootCmd *cobra.Command
 var verbose bool
 
 func Execute() {
+	internal.Logger.Debug("Executing command")
+
 	err := rootCmd.Execute()
 
 	if err != nil {
@@ -29,26 +33,36 @@ func Execute() {
 }
 
 func init() {
+	projectScriptName := os.Getenv("PROJECT_SCRIPT_NAME")
+
+	if projectScriptName == "" {
+		projectScriptName = filepath.Base(os.Args[0])
+	}
+
+	// Disable sorting of commands, we want to keep the order of the files specified by their own ordering preferences
 	cobra.EnableCommandSorting = false
 
-	// the name of the called program, stripping off any path information
-	programName := filepath.Base(os.Args[0])
-
 	rootCmd = &cobra.Command{
-		Use:   programName,
+		Use:   projectScriptName,
 		Short: "Project Actions Command Runner",
 		Long:  `Project Actions Command Runner Description`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if !debug && verbose {
+				internal.Logger.SetLevel(logrus.InfoLevel)
+			}
+		},
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
 		},
 		CompletionOptions: cobra.CompletionOptions{
-			HiddenDefaultCmd: true, // hides cmd
+			HiddenDefaultCmd: true,
 		},
 	}
 
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "increase output verbosity")
 
-	projectActionsDir := "./project"
+	// cwd + /.project
+	projectActionsDir := filepath.Join(os.Getenv("PWD"), ".project")
 
 	if os.Getenv("PROJECT_ACTIONS_DIR") != "" {
 		projectActionsDir = os.Getenv("PROJECT_ACTIONS_DIR")
@@ -63,35 +77,47 @@ func init() {
 		isOutsideContainer = false
 	}
 
+	internal.Logger.Debug("Is outside container?", isOutsideContainer)
+
 	// dynamically add commands from yml files in the "commands" subdirectory
 	files, err := os.ReadDir(projectActionsDir + "/commands")
 
 	if err != nil {
-		// fmt.Println("Could not read commands directory:", err)
+		internal.Logger.Error("Could not read commands directory:", err)
 
 		return
 	}
 
+	internal.Logger.Debug("Looking for files in ", projectActionsDir+"/commands")
+
 	for _, f := range files {
-		if f.IsDir() || f.Name()[len(f.Name())-4:] != ".yml" {
+
+		// skip directories
+		if f.IsDir() {
 			continue
 		}
 
-		commandSpec, err := command.ParseCommandFile(projectActionsDir + "/commands/" + f.Name())
+		// skip files that are not .yaml or .yml
+		if f.Name()[len(f.Name())-5:] != ".yaml" && f.Name()[len(f.Name())-4:] != ".yml" {
+			continue
+		}
+
+		commandSpec, err := internal.ParseCommandFile(projectActionsDir + "/commands/" + f.Name())
 
 		if err != nil {
-			fmt.Println("Could not parse command file:", err)
+			internal.Logger.Error("Could not parse command file:", err)
+
 			return
 		}
 
 		baseName := f.Name()
 
-		if ext := filepath.Ext(baseName); ext == ".yml" {
+		if ext := filepath.Ext(baseName); ext == ".yml" || ext == ".yaml" {
 			baseName = baseName[:len(baseName)-len(ext)]
 		}
 
 		commandSpecs = append(commandSpecs, struct {
-			spec *command.Command
+			spec *internal.Command
 			name string
 		}{
 			spec: commandSpec,
@@ -111,7 +137,7 @@ func init() {
 			Short: cmdSpec.spec.Help.Short,
 			Long:  cmdSpec.spec.Help.Long,
 			Run: func(cmd *cobra.Command, args []string) {
-				command.RunCommand(cmdSpec.name, cmdSpec.spec, isOutsideContainer)
+				internal.RunCommand(cmdSpec.name, cmdSpec.spec, isOutsideContainer)
 			},
 		}
 
